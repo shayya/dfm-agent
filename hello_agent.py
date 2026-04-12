@@ -1,17 +1,14 @@
-import os
+import asyncio
+from claude_agent_sdk import query, ClaudeAgentOptions
 from dotenv import load_dotenv
-from anthropic import Anthropic
 
 load_dotenv()
 
-client = Anthropic()
+async def main():
+    async for message in query(
+        prompt="What is 2 + 2? Explain your reasoning briefly.",
+        options=ClaudeAgentOptions(),
+    ):
+        print(message)
 
-message = client.messages.create(
-    model="claude-sonnet-4-5",
-    max_tokens=1024,
-    messages=[
-        {"role": "user", "content": "Hello! In one sentence, what is an AI agent?"}
-    ]
-)
-
-print(message.content[0].text)
+asyncio.run(main())
