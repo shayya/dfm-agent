@@ -19,6 +19,26 @@ from OCC.Core.GeomAbs import (
 from OCC.Core.GProp import GProp_GProps
 from OCC.Core.BRepGProp import brepgprop
 
+# Module-level shape cache — populated by list_features(), consumed by measure.py
+_shape = None
+_face_index: dict = {}  # feature_id -> TopoDS_Face
+
+
+def get_shape():
+    """Return the loaded TopoDS_Shape. Raises if list_features() hasn't been called."""
+    if _shape is None:
+        raise RuntimeError("No part loaded. Call list_features() first.")
+    return _shape
+
+
+def get_face(feature_id: str):
+    """Return the TopoDS_Face for a given feature ID, e.g. 'f_003'."""
+    if feature_id not in _face_index:
+        raise KeyError(
+            f"Feature '{feature_id}' not found. Available: {sorted(_face_index.keys())}"
+        )
+    return _face_index[feature_id]
+
 
 SURFACE_TYPE_NAMES = {
     GeomAbs_Plane: "planar_face",
@@ -87,6 +107,7 @@ def _describe_face(face, face_id):
 
 def list_features(step_path: str) -> dict:
     """Read a STEP file and return per-face geometric detail."""
+    global _shape, _face_index
     reader = STEPControl_Reader()
     status = reader.ReadFile(step_path)
     if status != 1:  # 1 = IFSelect_RetDone (success)
@@ -94,6 +115,8 @@ def list_features(step_path: str) -> dict:
 
     reader.TransferRoots()
     shape = reader.OneShape()
+    _shape = shape
+    _face_index = {}
 
     summary = {
         "faces": _count(shape, TopAbs_FACE),
@@ -106,7 +129,9 @@ def list_features(step_path: str) -> dict:
     i = 1
     while explorer.More():
         face = topods.Face(explorer.Current())
-        features.append(_describe_face(face, f"f_{i:03d}"))
+        fid = f"f_{i:03d}"
+        _face_index[fid] = face
+        features.append(_describe_face(face, fid))
         i += 1
         explorer.Next()
 
