@@ -1,0 +1,12 @@
+{
+  "name": "dfm-agent-brep",
+  "version": "0.1.0",
+  "description": "B-Rep DFM analyzer PoC using opencascade.js",
+  "type": "module",
+  "scripts": {
+    "serve": "npx serve ."
+  },
+  "dependencies": {
+    "opencascade.js": "^1.1.1"
+  }
+}
