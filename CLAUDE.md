@@ -4,39 +4,22 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-DFM Agent — an AI agent that analyzes CAD STEP files for CNC manufacturability issues. Two parallel implementations exist:
+DFM Agent — an AI agent that analyzes CAD STEP files for CNC manufacturability issues. This branch (`occt-brep-analysis`) is the JS B-Rep analyzer: a browser-based 3D visualization proof-of-concept using opencascade.js WASM.
 
-1. **Python agent** (`agent.py`, `list_features.py`, `measure.py`) — CLI tool using Claude Agent SDK + pythonOCC for production DFM analysis
-2. **JS B-Rep analyzer** (`src/brep/`) — browser-based 3D visualization proof-of-concept using opencascade.js WASM
-
-The JS B-Rep analyzer is on branch `occt-brep-analysis`. The Python agent is on `main`.
+The Python agent (Claude Agent SDK + pythonOCC) lives on `main`.
 
 ## Running
 
-### Python agent (requires conda + API key)
 ```bash
-conda activate dfm          # pythonOCC is conda-only
-python agent.py samples/part1.step --material aluminum
-```
-
-### JS B-Rep analyzer
-```bash
+# Browser (3D viewer)
 npx serve .
 # open http://localhost:<port>/src/brep/testHarness.html
-```
 
-### JS Node.js test (no browser needed)
-```bash
+# Node.js (headless test)
 node src/brep/testNode.mjs
 ```
 
 ## Architecture
-
-### Python (main branch)
-- `agent.py` — streaming agent loop (Claude Agent SDK) that calls measurement tools
-- `list_features.py` — STEP → topology inventory (face types, edge types, counts)
-- `measure.py` — measurement functions: wall thickness, hole depth, corner radius, pocket aspect ratio
-- Tools return JSON-serializable dicts. Face IDs: `f_001`, `f_002` (zero-padded)
 
 ### JS B-Rep (`src/brep/`)
 - `stepLoader.js` — fetches 65MB WASM binary, parses STEP into TopoDS_Shape
@@ -76,6 +59,5 @@ Rules 2 and 3 are implemented in the JS B-Rep analyzer. All 5 are targeted for t
 ## Environment
 
 - `node_modules/` is not gitignored (contains opencascade.js WASM)
-- `.env` holds `ANTHROPIC_API_KEY` for the Python agent
-- Python dependencies: pythonOCC (conda), anthropic, claude-agent-sdk, python-dotenv
 - JS dependencies: `opencascade.js@^1.1.1` (no bundler — uses browser import maps + CDN for Three.js)
+- Three.js loaded from jsDelivr CDN (`three@0.160.0`) — not a local dependency
