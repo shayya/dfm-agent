@@ -2,51 +2,64 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>B-Rep DFM Analyzer &mdash; PoC</title>
+  <title>B-Rep DFM Analyzer</title>
   <style>
-    body { font-family: monospace; max-width: 900px; margin: 2em auto; padding: 0 1em; }
-    h1 { font-size: 1.2em; }
-    #status { color: #555; margin: 0.5em 0; }
-    #stats  { background: #f5f5f5; padding: 0.5em 1em; border-radius: 4px; margin: 0.5em 0; }
-    ul#results { list-style: none; padding: 0; }
-    ul#results li { padding: 0.35em 0.6em; border-left: 4px solid #ccc; margin-bottom: 0.4em; }
-    li.critical { border-color: #d00; background: #fff0f0; }
-    li.warning  { border-color: #f80; background: #fffbe6; }
-    li.ok       { border-color: #090; background: #f0fff0; }
-    label { font-weight: bold; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', monospace; background: #0f0f1a; color: #ccc; }
+    .layout { display: flex; height: 100vh; }
+    .sidebar { width: 380px; min-width: 320px; padding: 1em; overflow-y: auto; border-right: 1px solid #2a2a3e; display: flex; flex-direction: column; gap: 0.8em; }
+    #viewer { flex: 1; position: relative; }
+    h1 { font-size: 1.1em; color: #eee; }
+    #status { color: #888; font-size: 0.85em; }
+    #stats  { background: #16162a; padding: 0.5em 0.8em; border-radius: 4px; font-size: 0.85em; line-height: 1.5; }
+    #stats ul { margin-left: 1.2em; }
+    ul#results { list-style: none; font-size: 0.85em; }
+    ul#results li { padding: 0.4em 0.6em; border-left: 4px solid #555; margin-bottom: 0.3em; border-radius: 0 3px 3px 0; }
+    li.critical { border-color: #d00; background: rgba(200,0,0,0.12); }
+    li.warning  { border-color: #f80; background: rgba(255,140,0,0.10); }
+    li.ok       { border-color: #0a0; background: rgba(0,160,0,0.10); }
+    label { font-weight: bold; font-size: 0.9em; }
+    input[type="file"] { font-size: 0.85em; }
+    .legend { font-size: 0.75em; color: #777; margin-top: auto; }
+    .legend span { margin-right: 1em; }
+    .legend .red { color: #ff3333; }
+    .legend .blue { color: #7a8fa6; }
   </style>
-  <!--
-    Serve from project root:  npx serve .
-    Then open http://localhost:3000/src/brep/testHarness.html
 
-    The importmap lets the browser resolve the bare "opencascade.js" specifier
-    without a bundler.
-  -->
+  <!-- Three.js + OrbitControls from CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/three@0.164.1/build/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.164.1/examples/js/controls/OrbitControls.js"></script>
+
+  <!-- opencascade.js via import map -->
   <script type="importmap">
     {
       "imports": {
-        "opencascade.js": "../../node_modules/opencascade.js/dist/opencascade.full.js"
+        "opencascade.js": "../../node_modules/opencascade.js/dist/opencascade.wasm.js"
       }
     }
   </script>
 </head>
 <body>
-  <h1>B-Rep DFM Analyzer &mdash; Proof of Concept</h1>
-  <p>
-    Uses <a href="https://github.com/donalffons/opencascade.js">opencascade.js</a>
-    to parse STEP files into full B-Rep topology and detect:
-  </p>
-  <ul>
-    <li><strong>Sharp internal corners</strong> &mdash; Line edges between two Planes, concave, no adjacent fillet</li>
-    <li><strong>Deep small holes</strong> &mdash; Cylindrical faces whose normal points toward the axis</li>
-  </ul>
+  <div class="layout">
+    <div class="sidebar">
+      <h1>B-Rep DFM Analyzer</h1>
+      <p style="font-size:0.8em;color:#888;">
+        Detects sharp internal corners and deep small holes using B-Rep topology.
+      </p>
+      <label for="file-input">Load STEP file:</label>
+      <input id="file-input" type="file" accept=".step,.stp">
 
-  <label for="file-input">Load STEP file:</label>
-  <input id="file-input" type="file" accept=".step,.stp">
+      <p id="status">Select a .step or .stp file to begin.</p>
+      <div id="stats"></div>
+      <ul id="results"></ul>
 
-  <p id="status">Select a .step or .stp file to begin.</p>
-  <div id="stats"></div>
-  <ul id="results"></ul>
+      <div class="legend">
+        <span class="red">&#9632; Sharp corners</span>
+        <span class="blue">&#9632; Part surface</span>
+      </div>
+    </div>
+    <div id="viewer"></div>
+  </div>
 
   <script type="module" src="./main.js"></script>
 </body>

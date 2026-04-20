@@ -1,21 +1,30 @@
-import initOpenCascade from 'opencascade.js';
+/**
+ * opencascade.js loader — works in both browser (via import map) and Node.js.
+ *
+ * Browser: import map resolves "opencascade.js" to the WASM JS module.
+ * Node.js: createRequire is used in testNode.mjs; this module expects the
+ *          browser path.
+ */
+
+import opencascadeFactory from 'opencascade.js';
 
 let _oc = null;
 
+/**
+ * Initialize (or return cached) opencascade.js instance.
+ * In the browser, locateFile resolves the .wasm file relative to the import map.
+ */
 async function getOC() {
   if (!_oc) {
-    _oc = await initOpenCascade();
+    _oc = await opencascadeFactory({
+      locateFile: (path) => new URL(path, import.meta.url).href,
+    });
   }
   return _oc;
 }
 
 /**
  * Load a STEP file into a B-Rep shape.
- *
- * Uses opencascade.js (full OpenCASCADE WASM), NOT occt-import-js.
- * occt-import-js only produces tessellated meshes — no face types, no edge
- * types, no topology.  opencascade.js gives us the real B-Rep: Geom_Plane,
- * Geom_CylindricalSurface, TopExp_Explorer, etc.
  *
  * @param {ArrayBuffer} arrayBuffer - raw bytes of a .step / .stp file
  * @returns {{ oc: object, shape: object, stats: object }}
@@ -33,8 +42,11 @@ export async function loadStep(arrayBuffer) {
   const readStatus = reader.ReadFile('model.step');
   try { oc.FS.unlink('model.step'); } catch (_) {}
 
-  if (readStatus !== oc.IFSelect_ReturnStatus.IFSelect_RetDone) {
-    throw new Error(`STEPControl_Reader failed with status ${readStatus}`);
+  // readStatus may be an OCCT enum object (.value) or a plain number
+  const doneVal = oc.IFSelect_ReturnStatus.IFSelect_RetDone.value;
+  const statusVal = readStatus.value !== undefined ? readStatus.value : readStatus;
+  if (statusVal !== doneVal) {
+    throw new Error(`STEPControl_Reader failed with status ${statusVal}`);
   }
 
   reader.TransferRoots();
@@ -42,7 +54,6 @@ export async function loadStep(arrayBuffer) {
 
   const stats = collectStats(oc, shape);
   console.log('[stepLoader] B-Rep structure:', stats);
-  console.log('[stepLoader] Full shape:', shape);
 
   return { oc, shape, stats };
 }
