@@ -9,9 +9,12 @@
  *   - Interior angle < 135 degrees
  *
  * Concavity test (no face.Orientation() needed):
- *   Take the two plane normals N_A and N_B.  The edge is concave when
- *   a point slightly inside the dihedral angle (midpoint + epsilon
- *   toward both normals) lies INSIDE the solid.
+ *   Take the two plane normals N_A and N_B.  The edge is concave (internal)
+ *   when a point slightly inside the dihedral angle (midpoint + epsilon
+ *   toward both face interiors) lies OUTSIDE the solid — meaning the
+ *   angle opens into a void (pocket, recess), not into the bulk material.
+ *   External convex corners have the test point INSIDE the solid and are
+ *   correctly skipped.
  */
 
 const RAD_TO_DEG = 180 / Math.PI;
@@ -168,7 +171,7 @@ export function detectSharpCorners(oc, shape) {
   const CIRCLE = oc.GeomAbs_CurveType.GeomAbs_Circle.value;
   const ELLIPSE = oc.GeomAbs_CurveType.GeomAbs_Ellipse.value;
   const CYLINDER = oc.GeomAbs_SurfaceType.GeomAbs_Cylinder.value;
-  const TOPABS_IN = 0; // TopAbs_State.TopAbs_IN
+  const TOPABS_OUT = 1; // TopAbs_State.TopAbs_OUT
 
   const faces = collectFaces(oc, shape);
   const edgeToFaces = buildEdgeToFacesMap(oc, faces);
@@ -238,8 +241,10 @@ export function detectSharpCorners(oc, shape) {
     if (isFilleted) { edgeIndex++; continue; }
 
     // 6. Concavity test using solid classifier:
-    //    Sample a point slightly inside the dihedral angle and check
-    //    if it's inside the solid. If yes → concave.
+    //    Sample a point slightly inside the dihedral angle (toward both
+    //    face interiors) and check if it's outside the solid.
+    //    If outside → the angle opens into void (pocket/recess) → internal
+    //    concave corner.  If inside → external convex corner → skip.
     const midPt = edgeMidpoint(curveAdaptor);
     const P_A = faceInteriorPoint(faceA.adaptor);
     const P_B = faceInteriorPoint(faceB.adaptor);
@@ -256,8 +261,8 @@ export function detectSharpCorners(oc, shape) {
     classifier.Perform(testPt, 1e-7);
     const state = classifier.State().value;
 
-    // If test point is inside the solid → concave (material fills the angle)
-    if (state !== TOPABS_IN) { edgeIndex++; continue; }
+    // If test point is NOT outside the solid → external convex corner, skip
+    if (state !== TOPABS_OUT) { edgeIndex++; continue; }
 
     // 7. Compute interior angle
     //    Use the geometric normals. The angle between the planes is

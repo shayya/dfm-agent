@@ -107,6 +107,8 @@ export function detectDeepHoles(oc, shape) {
     if (severity !== null) {
       results.push({
         faceIndex,
+        location: axisMid,
+        axis: D,
         diameter: Math.round(diameter * 1000) / 1000,
         depth: Math.round(depth * 1000) / 1000,
         aspectRatio: Math.round(aspectRatio * 100) / 100,

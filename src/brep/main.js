@@ -171,16 +171,58 @@ function createViewer() {
       // Compute normals if missing (all zeros)
       geometry.computeVertexNormals();
 
-      // Solid mesh — semi-transparent steel blue
-      const material = new THREE.MeshPhongMaterial({
-        color: 0x7a8fa6,
-        shininess: 60,
-        specular: 0x333333,
-        transparent: true,
-        opacity: 0.85,
-        side: THREE.DoubleSide,
-      });
-      const solidMesh = new THREE.Mesh(geometry, material);
+      // Build sets of flagged face indices
+      const cornerFaces = new Set();
+      for (const c of corners) {
+        cornerFaces.add(c.faceA_index);
+        cornerFaces.add(c.faceB_index);
+      }
+      const holeFaces = new Set();
+      for (const h of holes) {
+        holeFaces.add(h.faceIndex);
+      }
+
+      // Assign per-face groups with material index
+      // 0 = default, 1 = sharp corner (red), 2 = deep hole (orange)
+      for (const fg of mesh.faceGroups) {
+        let matIdx = 0;
+        if (holeFaces.has(fg.faceIndex)) matIdx = 2;
+        else if (cornerFaces.has(fg.faceIndex)) matIdx = 1;
+        geometry.addGroup(fg.start, fg.count, matIdx);
+      }
+
+      // Materials array (index must match addGroup materialIndex)
+      const materials = [
+        // 0: default steel blue
+        new THREE.MeshPhongMaterial({
+          color: 0x7a8fa6,
+          shininess: 60,
+          specular: 0x333333,
+          transparent: true,
+          opacity: 0.85,
+          side: THREE.DoubleSide,
+        }),
+        // 1: sharp corner — red tint
+        new THREE.MeshPhongMaterial({
+          color: 0xff3333,
+          shininess: 60,
+          specular: 0x333333,
+          transparent: true,
+          opacity: 0.85,
+          side: THREE.DoubleSide,
+        }),
+        // 2: deep hole — orange tint
+        new THREE.MeshPhongMaterial({
+          color: 0xff8800,
+          shininess: 60,
+          specular: 0x333333,
+          transparent: true,
+          opacity: 0.85,
+          side: THREE.DoubleSide,
+        }),
+      ];
+
+      const solidMesh = new THREE.Mesh(geometry, materials);
       solidMesh.userData.dfmMesh = true;
       scene.add(solidMesh);
 
@@ -194,30 +236,6 @@ function createViewer() {
       const wireMesh = new THREE.Mesh(geometry, wireMat);
       wireMesh.userData.dfmMesh = true;
       scene.add(wireMesh);
-
-      // Highlight sharp corner edges as red lines
-      if (corners.length > 0) {
-        const cornerPositions = [];
-        for (const c of corners) {
-          cornerPositions.push(
-            c.startPoint.x, c.startPoint.y, c.startPoint.z,
-            c.endPoint.x, c.endPoint.y, c.endPoint.z,
-          );
-        }
-        const cornerGeom = new THREE.BufferGeometry();
-        cornerGeom.setAttribute('position',
-          new THREE.Float32BufferAttribute(cornerPositions, 3));
-        const cornerMat = new THREE.LineBasicMaterial({
-          color: 0xff3333,
-          linewidth: 2,
-        });
-        const cornerLines = new THREE.LineSegments(cornerGeom, cornerMat);
-        cornerLines.userData.dfmMesh = true;
-        scene.add(cornerLines);
-      }
-
-      // Highlight hole axis lines as orange
-      // (We'd need axis info from the hole detector — for now skip, or add later)
     },
 
     fitCamera() {

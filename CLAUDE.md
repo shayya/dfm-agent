@@ -35,8 +35,24 @@ testHarness.html
 
 | Detector | What it finds | How |
 |----------|--------------|-----|
-| Sharp corners | Line edges between two Planes, concave, no fillet, angle < 135° | `BRepClass3d_SolidClassifier` for concavity; fillet check via adjacent Circle+Cylinder edges |
+| Sharp corners | Line edges between two Planes, **internal** concave (pocket/recess), no fillet, angle < 135° | `BRepClass3d_SolidClassifier` — test point inside dihedral angle OUTSIDE solid = internal concave; fillet check via adjacent Circle+Cylinder edges |
 | Deep holes | Cylindrical faces that are voids (not shafts), with high depth/diameter | `BRepClass3d_SolidClassifier` — axis midpoint outside solid = hole |
+
+### Visualization
+
+Per-face highlighting via Three.js `addGroup()` + multi-material array. Flagged faces (from detector `faceIndex`/`faceA_index`/`faceB_index`) get colored materials:
+- Sharp corner faces → red (`0xff3333`)
+- Deep hole faces → orange (`0xff8800`)
+- All other faces → default steel blue (`0x7a8fa6`)
+
+### Tessellation
+
+Per-face adaptive `BRepMesh_IncrementalMesh` — each face gets deflection settings matched to its surface type:
+- Plane: 0.1 linear / 0.3 angular (coarse, flat anyway)
+- Cylinder/Cone/Sphere/Torus: 0.01 / 0.05 (fine, prevents faceting)
+- BSpline/other: 0.02 / 0.08 (medium)
+
+`faceGroups` entries include `surfaceType` string for material assignment.
 
 Three more rules from `spec.md` are not yet implemented: min wall thickness, pocket aspect ratio, min feature size.
 
