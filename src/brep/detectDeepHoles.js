@@ -1,15 +1,13 @@
 /**
  * Detect deep small holes in a B-Rep shape.
  *
- * A hole is a cylindrical face whose outward surface normal points TOWARD
- * the cylinder axis (i.e. the face is the interior wall of a drilled hole),
- * as opposed to an external boss/shaft whose normal points away from the axis.
+ * A hole is a cylindrical face whose interior (axis midpoint) is OUTSIDE
+ * the solid (void space), as opposed to a shaft whose axis is inside
+ * the material.
  *
- * Hole-vs-shaft test:
- *   Sample a point on the surface, compute the vector from the nearest axis
- *   point to the surface point (V_out).  Then get the face's outward normal
- *   at that UV (analytically: V_out direction, flipped for REVERSED faces).
- *   If dot(faceNormal, V_out) < 0 the normal points toward the axis → hole.
+ * Uses BRepClass3d_SolidClassifier to test whether a point on the
+ * cylinder axis is inside or outside the solid, which avoids relying
+ * on face.Orientation() (not exposed in this opencascade.js build).
  */
 
 function dot3(a, b) {
@@ -31,25 +29,19 @@ function norm3(v) {
 }
 
 /**
- * Project point P onto the line (origin O, unit direction D).
- */
-function projectOnAxis(P, O, D) {
-  const t = (P.x - O.x) * D.x + (P.y - O.y) * D.y + (P.z - O.z) * D.z;
-  return { x: O.x + t * D.x, y: O.y + t * D.y, z: O.z + t * D.z };
-}
-
-/**
  * @param {object} oc    - opencascade.js instance
  * @param {object} shape - TopoDS_Shape
- * @returns {Array<{faceIndex, diameter, depth, aspectRatio, axisStart, axisEnd, severity}>}
+ * @returns {Array<{faceIndex, diameter, depth, aspectRatio, severity}>}
  */
 export function detectDeepHoles(oc, shape) {
   const CYLINDER = oc.GeomAbs_SurfaceType.GeomAbs_Cylinder.value;
-  const REVERSED = oc.TopAbs_Orientation.TopAbs_REVERSED.value;
+  const TOPABS_OUT = 1; // TopAbs_State.TopAbs_OUT
 
   const results = [];
+  const classifier = new oc.BRepClass3d_SolidClassifier_2(shape);
+
   const faceExp = new oc.TopExp_Explorer_1();
-  faceExp.Init(shape, oc.TopAbs_ShapeEnum.TopAbs_FACE);
+  faceExp.Init(shape, oc.TopAbs_ShapeEnum.TopAbs_FACE, oc.TopAbs_ShapeEnum.TopAbs_SHAPE);
   let faceIndex = 0;
 
   while (faceExp.More()) {
@@ -77,42 +69,30 @@ export function detectDeepHoles(oc, shape) {
     const vMin = adaptor.FirstVParameter();
     const vMax = adaptor.LastVParameter();
     const depth = Math.abs(vMax - vMin);
-
-    const axisStart = { x: O.x + vMin * D.x, y: O.y + vMin * D.y, z: O.z + vMin * D.z };
-    const axisEnd   = { x: O.x + vMax * D.x, y: O.y + vMax * D.y, z: O.z + vMax * D.z };
-
-    // Hole-vs-shaft test:
-    // Sample a point on the cylinder surface at UV midpoint.
-    const uMid = (adaptor.FirstUParameter() + adaptor.LastUParameter()) / 2;
     const vMid = (vMin + vMax) / 2;
-    const surfPtRaw = adaptor.Value(uMid, vMid);
-    const surfPt = { x: surfPtRaw.X(), y: surfPtRaw.Y(), z: surfPtRaw.Z() };
 
-    // Vector from nearest axis point to surface point (points AWAY from axis)
-    const axisProj = projectOnAxis(surfPt, O, D);
-    const V_out = sub3(surfPt, axisProj);
-
-    // Analytical outward normal for a cylinder = direction away from axis
-    const outwardDir = norm3(V_out);
-
-    // Account for face orientation: REVERSED faces flip the effective normal
-    const sign = (face.Orientation().value === REVERSED) ? -1 : 1;
-    const faceNormal = {
-      x: outwardDir.x * sign,
-      y: outwardDir.y * sign,
-      z: outwardDir.z * sign,
+    // Point on the axis at midpoint
+    const axisMid = {
+      x: O.x + vMid * D.x,
+      y: O.y + vMid * D.y,
+      z: O.z + vMid * D.z,
     };
 
-    // dot(faceNormal, V_out) > 0 → normal points away from axis → shaft → skip
-    // dot(faceNormal, V_out) < 0 → normal points toward axis → hole
-    if (dot3(faceNormal, V_out) >= 0) {
+    // Hole-vs-shaft test using solid classifier:
+    // If the axis midpoint is OUTSIDE the solid → void → hole
+    // If the axis midpoint is INSIDE the solid → material → shaft
+    const testPt = new oc.gp_Pnt_3(axisMid.x, axisMid.y, axisMid.z);
+    classifier.Perform(testPt, 1e-7);
+    const state = classifier.State().value;
+
+    if (state !== TOPABS_OUT) {
       adaptor.delete();
       faceIndex++;
       faceExp.Next();
       continue;
     }
 
-    // Classify severity
+    // It's a hole. Classify severity.
     const diameter = 2 * radius;
     const aspectRatio = depth / diameter;
 
@@ -130,8 +110,6 @@ export function detectDeepHoles(oc, shape) {
         diameter: Math.round(diameter * 1000) / 1000,
         depth: Math.round(depth * 1000) / 1000,
         aspectRatio: Math.round(aspectRatio * 100) / 100,
-        axisStart,
-        axisEnd,
         severity,
       });
     }
@@ -142,5 +120,6 @@ export function detectDeepHoles(oc, shape) {
   }
 
   faceExp.delete();
+  classifier.delete();
   return results;
 }

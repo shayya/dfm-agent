@@ -24,18 +24,20 @@ export async function loadStep(arrayBuffer) {
   const oc = await getOC();
   const data = new Uint8Array(arrayBuffer);
 
-  // Write the file into the Emscripten virtual filesystem
-  oc.FS.createDataFile('/', 'model.step', data, true, true);
+  // Write into Emscripten virtual filesystem.
+  // NOTE: use a relative path (no leading /) — absolute paths cause
+  // ReadFile to return IFSelect_RetError in this WASM build.
+  oc.FS.writeFile('model.step', data);
 
   const reader = new oc.STEPControl_Reader_1();
-  const readStatus = reader.ReadFile('/model.step');
-  oc.FS.unlink('/model.step');
+  const readStatus = reader.ReadFile('model.step');
+  try { oc.FS.unlink('model.step'); } catch (_) {}
 
   if (readStatus !== oc.IFSelect_ReturnStatus.IFSelect_RetDone) {
     throw new Error(`STEPControl_Reader failed with status ${readStatus}`);
   }
 
-  reader.TransferRoots(new oc.Message_ProgressRange_1());
+  reader.TransferRoots();
   const shape = reader.OneShape();
 
   const stats = collectStats(oc, shape);
@@ -72,7 +74,7 @@ function collectStats(oc, shape) {
 
   const faceCounts = {};
   const faceExplorer = new oc.TopExp_Explorer_1();
-  faceExplorer.Init(shape, oc.TopAbs_ShapeEnum.TopAbs_FACE);
+  faceExplorer.Init(shape, oc.TopAbs_ShapeEnum.TopAbs_FACE, oc.TopAbs_ShapeEnum.TopAbs_SHAPE);
   let faceTotal = 0;
   while (faceExplorer.More()) {
     const face = oc.TopoDS.Face_1(faceExplorer.Current());
@@ -88,7 +90,7 @@ function collectStats(oc, shape) {
 
   const edgeCounts = {};
   const edgeExplorer = new oc.TopExp_Explorer_1();
-  edgeExplorer.Init(shape, oc.TopAbs_ShapeEnum.TopAbs_EDGE);
+  edgeExplorer.Init(shape, oc.TopAbs_ShapeEnum.TopAbs_EDGE, oc.TopAbs_ShapeEnum.TopAbs_SHAPE);
   let edgeTotal = 0;
   while (edgeExplorer.More()) {
     const edge = oc.TopoDS.Edge_1(edgeExplorer.Current());

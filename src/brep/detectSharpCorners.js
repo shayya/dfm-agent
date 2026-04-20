@@ -6,15 +6,12 @@
  *   - Shared by exactly two planar faces
  *   - Where the junction is concave (material on the inside of the angle)
  *   - No adjacent cylindrical face bridging the vertices (i.e. no fillet)
- *   - Interior angle < 135°
+ *   - Interior angle < 135 degrees
  *
- * The concavity test:
- *   Take the outward normals N_A, N_B of the two planes and a point P_A
- *   on face A's interior (not on the shared edge).  The edge is concave
- *   when dot(N_B, P_A − edgeMidpoint) < 0 — P_A lies on the negative side
- *   of face B's outward half-space, meaning material fills the interior.
- *
- * Interior angle = π − acos(N_A · N_B).
+ * Concavity test (no face.Orientation() needed):
+ *   Take the two plane normals N_A and N_B.  The edge is concave when
+ *   a point slightly inside the dihedral angle (midpoint + epsilon
+ *   toward both normals) lies INSIDE the solid.
  */
 
 const RAD_TO_DEG = 180 / Math.PI;
@@ -31,6 +28,14 @@ function sub3(a, b) {
   return { x: a.x - b.x, y: a.y - b.y, z: a.z - b.z };
 }
 
+function add3(a, b) {
+  return { x: a.x + b.x, y: a.y + b.y, z: a.z + b.z };
+}
+
+function scale3(v, s) {
+  return { x: v.x * s, y: v.y * s, z: v.z * s };
+}
+
 function len3(v) {
   return Math.sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
 }
@@ -42,28 +47,20 @@ function norm3(v) {
 }
 
 /**
- * Get the outward unit normal of a planar face.
- * OCCT stores the geometric normal in the gp_Ax1 of the underlying gp_Plane.
- * For REVERSED-oriented faces the effective outward normal is flipped.
+ * Get the geometric unit normal of a planar face.
+ * Returns the axis direction of the underlying gp_Plane.
  */
-function planeOutwardNormal(oc, face, adaptor) {
+function planeGeometricNormal(oc, adaptor) {
   const gpDir = adaptor.Plane().Axis().Direction();
-  let n = { x: gpDir.X(), y: gpDir.Y(), z: gpDir.Z() };
-  if (face.Orientation().value === oc.TopAbs_Orientation.TopAbs_REVERSED.value) {
-    n = { x: -n.x, y: -n.y, z: -n.z };
-  }
-  return n;
+  return { x: gpDir.X(), y: gpDir.Y(), z: gpDir.Z() };
 }
 
 /**
  * Sample an interior point on a face at its UV midpoint.
  */
-function faceInteriorPoint(oc, face, adaptor) {
-  const uMin = { current: 0 }, uMax = { current: 0 };
-  const vMin = { current: 0 }, vMax = { current: 0 };
-  oc.BRepTools.UVBounds_1(face, uMin, uMax, vMin, vMax);
-  const uMid = (uMin.current + uMax.current) / 2;
-  const vMid = (vMin.current + vMax.current) / 2;
+function faceInteriorPoint(adaptor) {
+  const uMid = (adaptor.FirstUParameter() + adaptor.LastUParameter()) / 2;
+  const vMid = (adaptor.FirstVParameter() + adaptor.LastVParameter()) / 2;
   const pt = adaptor.Value(uMid, vMid);
   return { x: pt.X(), y: pt.Y(), z: pt.Z() };
 }
@@ -79,14 +76,10 @@ function edgeMidpoint(curveAdaptor) {
 
 // ---------- topology maps ----------
 
-/**
- * Collect all faces with their surface adaptors.
- * Returns array of { face, adaptor, surfaceType }.
- */
 function collectFaces(oc, shape) {
   const faces = [];
   const exp = new oc.TopExp_Explorer_1();
-  exp.Init(shape, oc.TopAbs_ShapeEnum.TopAbs_FACE);
+  exp.Init(shape, oc.TopAbs_ShapeEnum.TopAbs_FACE, oc.TopAbs_ShapeEnum.TopAbs_SHAPE);
   while (exp.More()) {
     const face = oc.TopoDS.Face_1(exp.Current());
     const adaptor = new oc.BRepAdaptor_Surface_2(face, true);
@@ -97,19 +90,15 @@ function collectFaces(oc, shape) {
   return faces;
 }
 
-/**
- * Build edge-hash → [faceIndex] adjacency.
- * Iterates each face's wires → edges.
- */
 function buildEdgeToFacesMap(oc, faces) {
   const map = new Map();
   for (let i = 0; i < faces.length; i++) {
     const { face } = faces[i];
     const wireExp = new oc.TopExp_Explorer_1();
-    wireExp.Init(face, oc.TopAbs_ShapeEnum.TopAbs_WIRE);
+    wireExp.Init(face, oc.TopAbs_ShapeEnum.TopAbs_WIRE, oc.TopAbs_ShapeEnum.TopAbs_SHAPE);
     while (wireExp.More()) {
       const edgeExp = new oc.TopExp_Explorer_1();
-      edgeExp.Init(wireExp.Current(), oc.TopAbs_ShapeEnum.TopAbs_EDGE);
+      edgeExp.Init(wireExp.Current(), oc.TopAbs_ShapeEnum.TopAbs_EDGE, oc.TopAbs_ShapeEnum.TopAbs_SHAPE);
       while (edgeExp.More()) {
         const edge = oc.TopoDS.Edge_1(edgeExp.Current());
         const hash = edge.HashCode(2147483647);
@@ -126,18 +115,15 @@ function buildEdgeToFacesMap(oc, faces) {
   return map;
 }
 
-/**
- * Build vertex-hash → Set(edge-hash) incidence.
- */
 function buildVertexToEdgesMap(oc, shape) {
   const map = new Map();
   const edgeExp = new oc.TopExp_Explorer_1();
-  edgeExp.Init(shape, oc.TopAbs_ShapeEnum.TopAbs_EDGE);
+  edgeExp.Init(shape, oc.TopAbs_ShapeEnum.TopAbs_EDGE, oc.TopAbs_ShapeEnum.TopAbs_SHAPE);
   while (edgeExp.More()) {
     const edge = oc.TopoDS.Edge_1(edgeExp.Current());
     const eHash = edge.HashCode(2147483647);
     const vtxExp = new oc.TopExp_Explorer_1();
-    vtxExp.Init(edge, oc.TopAbs_ShapeEnum.TopAbs_VERTEX);
+    vtxExp.Init(edge, oc.TopAbs_ShapeEnum.TopAbs_VERTEX, oc.TopAbs_ShapeEnum.TopAbs_SHAPE);
     while (vtxExp.More()) {
       const vtx = oc.TopoDS.Vertex_1(vtxExp.Current());
       const vHash = vtx.HashCode(2147483647);
@@ -152,13 +138,10 @@ function buildVertexToEdgesMap(oc, shape) {
   return map;
 }
 
-/**
- * Collect all unique edges (deduplicated by hash) with curve adaptors.
- */
 function collectEdges(oc, shape) {
   const map = new Map();
   const exp = new oc.TopExp_Explorer_1();
-  exp.Init(shape, oc.TopAbs_ShapeEnum.TopAbs_EDGE);
+  exp.Init(shape, oc.TopAbs_ShapeEnum.TopAbs_EDGE, oc.TopAbs_ShapeEnum.TopAbs_SHAPE);
   while (exp.More()) {
     const edge = oc.TopoDS.Edge_1(exp.Current());
     const hash = edge.HashCode(2147483647);
@@ -185,11 +168,15 @@ export function detectSharpCorners(oc, shape) {
   const CIRCLE = oc.GeomAbs_CurveType.GeomAbs_Circle.value;
   const ELLIPSE = oc.GeomAbs_CurveType.GeomAbs_Ellipse.value;
   const CYLINDER = oc.GeomAbs_SurfaceType.GeomAbs_Cylinder.value;
+  const TOPABS_IN = 0; // TopAbs_State.TopAbs_IN
 
   const faces = collectFaces(oc, shape);
   const edgeToFaces = buildEdgeToFacesMap(oc, faces);
   const vtxToEdges = buildVertexToEdgesMap(oc, shape);
   const edgeMap = collectEdges(oc, shape);
+
+  // Build solid classifier for concavity test
+  const classifier = new oc.BRepClass3d_SolidClassifier_2(shape);
 
   const results = [];
   let edgeIndex = 0;
@@ -213,21 +200,16 @@ export function detectSharpCorners(oc, shape) {
     const faceA = faces[idxA];
     const faceB = faces[idxB];
 
-    // 4. Concavity test
-    const N_A = planeOutwardNormal(oc, faceA.face, faceA.adaptor);
-    const N_B = planeOutwardNormal(oc, faceB.face, faceB.adaptor);
-    const midPt = edgeMidpoint(curveAdaptor);
-    const P_A = faceInteriorPoint(oc, faceA.face, faceA.adaptor);
-    const vecToPA = sub3(P_A, midPt);
-    // If P_A is on the negative side of face B's outward half-space → concave
-    if (dot3(N_B, vecToPA) >= 0) { edgeIndex++; continue; }
+    // 4. Compute geometric normals for both planes
+    const N_A = planeGeometricNormal(oc, faceA.adaptor);
+    const N_B = planeGeometricNormal(oc, faceB.adaptor);
 
     // 5. Fillet check — any vertex-neighbour edge that is circular/elliptical
     //    AND adjacent to a cylindrical face means a fillet is present.
     let isFilleted = false;
     {
       const vtxExp = new oc.TopExp_Explorer_1();
-      vtxExp.Init(edge, oc.TopAbs_ShapeEnum.TopAbs_VERTEX);
+      vtxExp.Init(edge, oc.TopAbs_ShapeEnum.TopAbs_VERTEX, oc.TopAbs_ShapeEnum.TopAbs_SHAPE);
       while (vtxExp.More()) {
         const vtx = oc.TopoDS.Vertex_1(vtxExp.Current());
         const vHash = vtx.HashCode(2147483647);
@@ -255,14 +237,39 @@ export function detectSharpCorners(oc, shape) {
     }
     if (isFilleted) { edgeIndex++; continue; }
 
-    // 6. Compute interior angle = π − acos(N_A · N_B)
+    // 6. Concavity test using solid classifier:
+    //    Sample a point slightly inside the dihedral angle and check
+    //    if it's inside the solid. If yes → concave.
+    const midPt = edgeMidpoint(curveAdaptor);
+    const P_A = faceInteriorPoint(faceA.adaptor);
+    const P_B = faceInteriorPoint(faceB.adaptor);
+
+    // Direction from edge midpoint toward each face's interior
+    const dirA = norm3(sub3(P_A, midPt));
+    const dirB = norm3(sub3(P_B, midPt));
+
+    // Point slightly inside the dihedral angle
+    const eps = 0.01;
+    const testPoint = add3(midPt, scale3(add3(dirA, dirB), eps));
+
+    const testPt = new oc.gp_Pnt_3(testPoint.x, testPoint.y, testPoint.z);
+    classifier.Perform(testPt, 1e-7);
+    const state = classifier.State().value;
+
+    // If test point is inside the solid → concave (material fills the angle)
+    if (state !== TOPABS_IN) { edgeIndex++; continue; }
+
+    // 7. Compute interior angle
+    //    Use the geometric normals. The angle between the planes is
+    //    acos(|N_A . N_B|). For a concave junction, the interior angle
+    //    (material side) is pi - acos(N_A . N_B).
     const cosAngle = dot3(N_A, N_B);
     const normalAngleRad = safeAcos(cosAngle);
     const interiorAngleDeg = (Math.PI - normalAngleRad) * RAD_TO_DEG;
 
     if (interiorAngleDeg >= 135) { edgeIndex++; continue; }
 
-    // 7. Record result
+    // 8. Record result
     const t0 = curveAdaptor.FirstParameter();
     const t1 = curveAdaptor.LastParameter();
     const p0 = curveAdaptor.Value(t0);
@@ -286,6 +293,7 @@ export function detectSharpCorners(oc, shape) {
   // Cleanup adaptors
   for (const { adaptor } of faces) adaptor.delete();
   for (const { curveAdaptor } of edgeMap.values()) curveAdaptor.delete();
+  classifier.delete();
 
   return results;
 }
