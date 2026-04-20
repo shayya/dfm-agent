@@ -56,12 +56,16 @@ async function main() {
   // Run detectors
   const { detectSharpCorners } = await import('./detectSharpCorners.js');
   const { detectDeepHoles } = await import('./detectDeepHoles.js');
+  const { detectSmallFillets } = await import('./detectSmallFillets.js');
 
   console.log('Running sharp corner detector...');
   const corners = detectSharpCorners(oc, shape);
 
   console.log('Running deep hole detector...');
   const holes = detectDeepHoles(oc, shape);
+
+  console.log('Running small fillet detector...');
+  const fillets = detectSmallFillets(oc, shape);
 
   console.log('\n=== Sharp Internal Corners ===');
   if (corners.length === 0) {
@@ -91,7 +95,18 @@ async function main() {
     );
   }
 
-  console.log(`\nDone. ${corners.length} corner(s), ${holes.length} hole(s) flagged.`);
+  console.log('\n=== Small Internal Fillets ===');
+  if (fillets.length === 0) {
+    console.log('  (none detected)');
+  }
+  for (const fl of fillets) {
+    console.log(
+      `  [${fl.severity.toUpperCase()}] Face #${fl.faceIndex}: ` +
+      `radius ${fl.radius} mm`
+    );
+  }
+
+  console.log(`\nDone. ${corners.length} corner(s), ${holes.length} hole(s), ${fillets.length} fillet(s) flagged.`);
 }
 
 main().catch(err => {

@@ -3,6 +3,7 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { loadStep } from './stepLoader.js';
 import { detectSharpCorners } from './detectSharpCorners.js';
 import { detectDeepHoles } from './detectDeepHoles.js';
+import { detectSmallFillets } from './detectSmallFillets.js';
 import { tessellateShape } from './tessellate.js';
 
 const fileInput = document.getElementById('file-input');
@@ -36,6 +37,7 @@ fileInput.addEventListener('change', async (evt) => {
 
     const corners = detectSharpCorners(oc, shape);
     const holes   = detectDeepHoles(oc, shape);
+    const fillets = detectSmallFillets(oc, shape);
 
     statusEl.textContent = 'Building 3D viewer...';
 
@@ -44,7 +46,7 @@ fileInput.addEventListener('change', async (evt) => {
     if (!viewer) {
       viewer = createViewer();
     }
-    viewer.renderMesh(mesh, corners, holes);
+    viewer.renderMesh(mesh, corners, holes, fillets);
     viewer.fitCamera();
 
     // Render issue list
@@ -75,6 +77,16 @@ fileInput.addEventListener('change', async (evt) => {
       });
     }
 
+    for (const fl of fillets) {
+      items.push({
+        severity: fl.severity,
+        html:
+          `<strong>[${fl.severity.toUpperCase()}]</strong> Small internal fillet \u2014 ` +
+          `face #${fl.faceIndex}, ` +
+          `radius <strong>${fl.radius} mm</strong>`,
+      });
+    }
+
     if (items.length === 0) {
       resultsEl.innerHTML = '<li class="ok">No DFM issues detected.</li>';
     } else {
@@ -84,7 +96,7 @@ fileInput.addEventListener('change', async (evt) => {
     }
 
     statusEl.textContent =
-      `Done. ${corners.length} sharp corner(s), ${holes.length} deep hole(s) flagged.`;
+      `Done. ${corners.length} sharp corner(s), ${holes.length} deep hole(s), ${fillets.length} small fillet(s) flagged.`;
   } catch (err) {
     statusEl.textContent = `Error: ${err.message}`;
     console.error(err);
@@ -154,7 +166,7 @@ function createViewer() {
     controls,
     renderer,
 
-    renderMesh(mesh, corners, holes) {
+    renderMesh(mesh, corners, holes, fillets) {
       // Remove previous mesh objects
       const toRemove = [];
       scene.traverse(child => {
@@ -171,23 +183,24 @@ function createViewer() {
       // Compute normals if missing (all zeros)
       geometry.computeVertexNormals();
 
-      // Build sets of flagged face indices
-      const cornerFaces = new Set();
-      for (const c of corners) {
-        cornerFaces.add(c.faceA_index);
-        cornerFaces.add(c.faceB_index);
-      }
+      // Build set of flagged hole face indices
       const holeFaces = new Set();
       for (const h of holes) {
         holeFaces.add(h.faceIndex);
       }
 
+      // Build set of flagged fillet face indices
+      const filletFaces = new Set();
+      for (const fl of fillets) {
+        filletFaces.add(fl.faceIndex);
+      }
+
       // Assign per-face groups with material index
-      // 0 = default, 1 = sharp corner (red), 2 = deep hole (orange)
+      // 0 = default, 1 = deep hole (orange), 2 = small fillet (yellow)
       for (const fg of mesh.faceGroups) {
         let matIdx = 0;
-        if (holeFaces.has(fg.faceIndex)) matIdx = 2;
-        else if (cornerFaces.has(fg.faceIndex)) matIdx = 1;
+        if (holeFaces.has(fg.faceIndex)) matIdx = 1;
+        if (filletFaces.has(fg.faceIndex)) matIdx = 2;
         geometry.addGroup(fg.start, fg.count, matIdx);
       }
 
@@ -202,18 +215,18 @@ function createViewer() {
           opacity: 0.85,
           side: THREE.DoubleSide,
         }),
-        // 1: sharp corner — red tint
+        // 1: deep hole — orange tint
         new THREE.MeshPhongMaterial({
-          color: 0xff3333,
+          color: 0xff8800,
           shininess: 60,
           specular: 0x333333,
           transparent: true,
           opacity: 0.85,
           side: THREE.DoubleSide,
         }),
-        // 2: deep hole — orange tint
+        // 2: small fillet — yellow
         new THREE.MeshPhongMaterial({
-          color: 0xff8800,
+          color: 0xffcc33,
           shininess: 60,
           specular: 0x333333,
           transparent: true,
@@ -236,6 +249,31 @@ function createViewer() {
       const wireMesh = new THREE.Mesh(geometry, wireMat);
       wireMesh.userData.dfmMesh = true;
       scene.add(wireMesh);
+
+      // Sharp-corner edge overlays: bright red LineSegments on top of mesh
+      if (corners.length > 0) {
+        const linePositions = new Float32Array(corners.length * 6);
+        for (let i = 0; i < corners.length; i++) {
+          const c = corners[i];
+          const off = i * 6;
+          linePositions[off]     = c.startPoint.x;
+          linePositions[off + 1] = c.startPoint.y;
+          linePositions[off + 2] = c.startPoint.z;
+          linePositions[off + 3] = c.endPoint.x;
+          linePositions[off + 4] = c.endPoint.y;
+          linePositions[off + 5] = c.endPoint.z;
+        }
+        const lineGeom = new THREE.BufferGeometry();
+        lineGeom.setAttribute('position', new THREE.BufferAttribute(linePositions, 3));
+        const lineMat = new THREE.LineBasicMaterial({
+          color: 0xff3333,
+          depthTest: false,
+        });
+        const lineSegments = new THREE.LineSegments(lineGeom, lineMat);
+        lineSegments.userData.dfmMesh = true;
+        lineSegments.renderOrder = 1;
+        scene.add(lineSegments);
+      }
     },
 
     fitCamera() {

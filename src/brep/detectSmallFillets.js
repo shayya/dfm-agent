@@ -1,22 +1,18 @@
 /**
- * Detect deep small holes in a B-Rep shape.
+ * Detect small internal fillets in a B-Rep shape.
  *
- * A hole is a cylindrical face whose interior (axis midpoint) is OUTSIDE
- * the solid (void space), as opposed to a shaft whose axis is inside
- * the material.
+ * A small internal fillet is a cylindrical face where:
+ *   1. Surface type is Cylinder
+ *   2. uSweep < 300° (partial arc — rules out full drilled holes)
+ *   3. Cylinder axis midpoint is INSIDE the solid (material wraps around
+ *      the fillet — internal concave corner), NOT outside (external round)
+ *   4. Radius < FILLET_RADIUS_THRESHOLD (default 1.0 mm)
  *
- * Uses BRepClass3d_SolidClassifier to test whether a point on the
- * cylinder axis is inside or outside the solid, which avoids relying
- * on face.Orientation() (not exposed in this opencascade.js build).
+ * Uses BRepClass3d_SolidClassifier to test inside/outside, same pattern
+ * as detectDeepHoles.js but with the state check inverted.
  */
 
-function dot3(a, b) {
-  return a.x * b.x + a.y * b.y + a.z * b.z;
-}
-
-function sub3(a, b) {
-  return { x: a.x - b.x, y: a.y - b.y, z: a.z - b.z };
-}
+const FILLET_RADIUS_THRESHOLD = 1.0; // mm
 
 function len3(v) {
   return Math.sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
@@ -31,9 +27,9 @@ function norm3(v) {
 /**
  * @param {object} oc    - opencascade.js instance
  * @param {object} shape - TopoDS_Shape
- * @returns {Array<{faceIndex, diameter, depth, aspectRatio, severity}>}
+ * @returns {Array<{faceIndex, radius, axis, location, severity}>}
  */
-export function detectDeepHoles(oc, shape) {
+export function detectSmallFillets(oc, shape) {
   const CYLINDER = oc.GeomAbs_SurfaceType.GeomAbs_Cylinder.value;
   const TOPABS_OUT = 1; // TopAbs_State.TopAbs_OUT
 
@@ -56,11 +52,10 @@ export function detectDeepHoles(oc, shape) {
       continue;
     }
 
-    // Reject fillets/rounds: a drilled hole wraps ~360° around its axis;
-    // a fillet wraps only ~90°. Require angular sweep ≥ 300°.
+    // Must be a partial arc (< 300°), not a full drilled hole
     const uSweep = Math.abs(adaptor.LastUParameter() - adaptor.FirstUParameter());
-    const MIN_HOLE_SWEEP = (300 * Math.PI) / 180; // ~5.236 rad
-    if (uSweep < MIN_HOLE_SWEEP) {
+    const MAX_FILLET_SWEEP = (300 * Math.PI) / 180; // ~5.236 rad
+    if (uSweep >= MAX_FILLET_SWEEP) {
       adaptor.delete();
       faceIndex++;
       faceExp.Next();
@@ -76,56 +71,49 @@ export function detectDeepHoles(oc, shape) {
     const O = { x: axisLoc.X(), y: axisLoc.Y(), z: axisLoc.Z() };
     const D = norm3({ x: axisDir.X(), y: axisDir.Y(), z: axisDir.Z() });
 
-    // Depth from V-parameter range (V is along the axis for OCCT cylinders)
+    // Point on the axis at V-midpoint
     const vMin = adaptor.FirstVParameter();
     const vMax = adaptor.LastVParameter();
-    const depth = Math.abs(vMax - vMin);
     const vMid = (vMin + vMax) / 2;
 
-    // Point on the axis at midpoint
     const axisMid = {
       x: O.x + vMid * D.x,
       y: O.y + vMid * D.y,
       z: O.z + vMid * D.z,
     };
 
-    // Hole-vs-shaft test using solid classifier:
-    // If the axis midpoint is OUTSIDE the solid → void → hole
-    // If the axis midpoint is INSIDE the solid → material → shaft
+    // Internal-fillet test: axis midpoint must be INSIDE the solid
+    // (material wraps around an internal concave fillet).
+    // External rounds have their axis in void (OUTSIDE solid) — skip those.
     const testPt = new oc.gp_Pnt_3(axisMid.x, axisMid.y, axisMid.z);
     classifier.Perform(testPt, 1e-7);
     const state = classifier.State().value;
 
-    if (state !== TOPABS_OUT) {
+    if (state === TOPABS_OUT) {
       adaptor.delete();
       faceIndex++;
       faceExp.Next();
       continue;
     }
 
-    // It's a hole. Classify severity.
-    const diameter = 2 * radius;
-    const aspectRatio = depth / diameter;
-
-    let severity = null;
-    if (diameter < 3.0) {
-      if (aspectRatio > 6) severity = 'critical';
-      else if (aspectRatio > 4) severity = 'warning';
-    } else {
-      if (aspectRatio > 8) severity = 'warning';
+    // Radius threshold check
+    if (radius >= FILLET_RADIUS_THRESHOLD) {
+      adaptor.delete();
+      faceIndex++;
+      faceExp.Next();
+      continue;
     }
 
-    if (severity !== null) {
-      results.push({
-        faceIndex,
-        location: axisMid,
-        axis: D,
-        diameter: Math.round(diameter * 1000) / 1000,
-        depth: Math.round(depth * 1000) / 1000,
-        aspectRatio: Math.round(aspectRatio * 100) / 100,
-        severity,
-      });
-    }
+    // Classify severity
+    const severity = radius < 0.5 ? 'critical' : 'warning';
+
+    results.push({
+      faceIndex,
+      radius: Math.round(radius * 1000) / 1000,
+      axis: D,
+      location: axisMid,
+      severity,
+    });
 
     adaptor.delete();
     faceIndex++;
