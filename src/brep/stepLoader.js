@@ -12,12 +12,20 @@ let _oc = null;
 
 /**
  * Initialize (or return cached) opencascade.js instance.
- * In the browser, locateFile resolves the .wasm file relative to the import map.
+ * In the browser, locateFile resolves the .wasm file relative to the HTML page.
  */
 async function getOC() {
   if (!_oc) {
     _oc = await opencascadeFactory({
-      locateFile: (path) => new URL(path, import.meta.url).href,
+      locateFile: (path) => {
+        // Resolve WASM file relative to the HTML page origin.
+        // The dist/ dir is at /node_modules/opencascade.js/dist/ when
+        // serving from project root with npx serve .
+        if (path.endsWith('.wasm')) {
+          return '/node_modules/opencascade.js/dist/' + path;
+        }
+        return path;
+      },
     });
   }
   return _oc;
