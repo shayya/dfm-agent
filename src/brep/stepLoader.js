@@ -12,21 +12,18 @@ let _oc = null;
 
 /**
  * Initialize (or return cached) opencascade.js instance.
- * In the browser, locateFile resolves the .wasm file relative to the HTML page.
+ * Fetches the WASM binary explicitly (avoids Emscripten's internal fetch
+ * which can fail with large files on some servers).
  */
 async function getOC() {
   if (!_oc) {
-    _oc = await opencascadeFactory({
-      locateFile: (path) => {
-        // Resolve WASM file relative to the HTML page origin.
-        // The dist/ dir is at /node_modules/opencascade.js/dist/ when
-        // serving from project root with npx serve .
-        if (path.endsWith('.wasm')) {
-          return '/node_modules/opencascade.js/dist/' + path;
-        }
-        return path;
-      },
-    });
+    const wasmUrl = '/node_modules/opencascade.js/dist/opencascade.wasm.wasm';
+    const response = await fetch(wasmUrl);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch WASM: ${response.status} ${response.statusText}`);
+    }
+    const wasmBinary = await response.arrayBuffer();
+    _oc = await opencascadeFactory({ wasmBinary });
   }
   return _oc;
 }
