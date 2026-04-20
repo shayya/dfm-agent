@@ -2,62 +2,67 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Project Overview
+## What this is
 
-DFM Agent — an AI agent that analyzes CAD STEP files for CNC manufacturability issues. This branch (`occt-brep-analysis`) is the JS B-Rep analyzer: a browser-based 3D visualization proof-of-concept using opencascade.js WASM.
+Browser-based DFM (Design for Manufacturability) analyzer for CNC-machined parts. Loads a STEP file, parses it into full B-Rep topology via opencascade.js WASM, runs geometric detectors, and renders the part in 3D with flagged issues highlighted.
 
-The Python agent (Claude Agent SDK + pythonOCC) lives on `main`.
+This is the JS B-Rep proof-of-concept on the `occt-brep-analysis` branch. The original Python agent (Claude Agent SDK + pythonOCC) lives on `main`.
 
 ## Running
 
 ```bash
-# Browser (3D viewer)
-npx serve .
-# open http://localhost:<port>/src/brep/testHarness.html
-
-# Node.js (headless test)
-node src/brep/testNode.mjs
+npm install                 # opencascade.js (includes 65MB WASM binary)
+npx serve .                 # then open /src/brep/testHarness.html
+node src/brep/testNode.mjs  # headless test against samples/part1.step
 ```
+
+No build step — uses browser import maps and Three.js from CDN.
 
 ## Architecture
 
-### JS B-Rep (`src/brep/`)
-- `stepLoader.js` — fetches 65MB WASM binary, parses STEP into TopoDS_Shape
-- `detectSharpCorners.js` — Line edges between Planes, concave, no fillet, angle < 135°
-- `detectDeepHoles.js` — Cylindrical faces classified hole-vs-shaft via `BRepClass3d_SolidClassifier`
-- `tessellate.js` — `BRepMesh_IncrementalMesh_2` → triangle arrays for Three.js
-- `main.js` — orchestrates loader → detectors → tessellation → Three.js viewer
-- `testHarness.html` — sidebar + 3D viewer split layout, Three.js + OrbitControls from CDN
+```
+testHarness.html
+  └─ main.js              entry point: file picker → orchestrator → Three.js viewer
+       ├─ stepLoader.js    fetch WASM, parse STEP → TopoDS_Shape + topology stats
+       ├─ detectSharpCorners.js
+       ├─ detectDeepHoles.js
+       └─ tessellate.js    BRepMesh → triangle arrays for Three.js
+```
 
-## opencascade.js API Quirks
+**Pipeline:** STEP file → opencascade.js WASM → B-Rep shape → detectors + tessellation → Three.js scene
 
-These are critical when working with the `src/brep/` code:
+### Detectors (what's implemented)
 
-- **VFS paths must be relative** — `oc.FS.writeFile('model.step', data)` works; `/model.step` causes `ReadFile` to return `IFSelect_RetError`
-- **`face.Orientation()` is not exposed** in opencascade.js 1.1.1 — use `BRepClass3d_SolidClassifier_2` instead to test inside/outside
-- **`TopExp_Explorer.Init` requires 3 args**: `(shape, TopAbs_FACE, TopAbs_SHAPE)` — not 2
-- **`BRep_Tool.Triangulation(face, loc)`** returns a handle — call `.get()` to get the `Poly_Triangulation` object
-- **`Message_ProgressRange` is not constructable** — call `reader.TransferRoots()` with no args
-- **`BRepTools.UVBounds` incompatible** — use `adaptor.FirstUParameter()` etc. instead
-- **WASM binary is 65MB** — must be fetched explicitly via `fetch()` and passed as `wasmBinary` to the factory (Emscripten's internal fetch fails)
-- **Enum comparisons use `.value`** — e.g., `adaptor.GetType().value === PLANE`
+| Detector | What it finds | How |
+|----------|--------------|-----|
+| Sharp corners | Line edges between two Planes, concave, no fillet, angle < 135° | `BRepClass3d_SolidClassifier` for concavity; fillet check via adjacent Circle+Cylinder edges |
+| Deep holes | Cylindrical faces that are voids (not shafts), with high depth/diameter | `BRepClass3d_SolidClassifier` — axis midpoint outside solid = hole |
 
-## DFM Rules (v1 scope)
+Three more rules from `spec.md` are not yet implemented: min wall thickness, pocket aspect ratio, min feature size.
 
-From `spec.md` — ship target May 4, 2026:
+## opencascade.js API quirks
 
-| # | Rule | Threshold |
-|---|------|-----------|
-| 1 | Min wall thickness | 0.8mm (Al), 0.5mm (steel) |
-| 2 | Hole depth/diameter ratio | > 10:1 |
-| 3 | Sharp internal corners | radius = 0 |
-| 4 | Deep pocket aspect ratio | depth > 4× width |
-| 5 | Min feature size | < 1mm |
+These are non-obvious and cost significant debugging time. All apply to opencascade.js v1.1.1 (OCCT V7_4_0p1):
 
-Rules 2 and 3 are implemented in the JS B-Rep analyzer. All 5 are targeted for the Python agent.
+- **VFS paths must be relative** — `'model.step'` works, `'/model.step'` causes `ReadFile` to return `IFSelect_RetError`
+- **`face.Orientation()` is not exposed** — use `BRepClass3d_SolidClassifier_2(shape)` then `.Perform(point, tol)` and check `.State().value` (0=IN, 1=OUT) to determine inside/outside
+- **`TopExp_Explorer.Init` takes 3 args** — `(shape, TopAbs_FACE, TopAbs_SHAPE)` not 2
+- **`BRep_Tool.Triangulation(face, loc)`** returns a Handle — call `.get()` to get the `Poly_Triangulation` with `.NbNodes()`, `.Node(i)`, `.Triangle(i)`
+- **`Message_ProgressRange` not constructable** — call `reader.TransferRoots()` with no args
+- **`BRepTools.UVBounds` incompatible** — use `adaptor.FirstUParameter()` / `.LastUParameter()` instead
+- **WASM is 65MB** — fetch explicitly via `fetch()` and pass `wasmBinary` to the factory; Emscripten's internal fetch fails
+- **Enum comparisons use `.value`** — `adaptor.GetType().value === PLANE` not `adaptor.GetType() === PLANE`
+- **`BRepMesh_IncrementalMesh_2`** is the correct constructor — takes `(shape, deflection, false, angle, false)`
 
-## Environment
+## Key dependencies
 
-- `node_modules/` is not gitignored (contains opencascade.js WASM)
-- JS dependencies: `opencascade.js@^1.1.1` (no bundler — uses browser import maps + CDN for Three.js)
-- Three.js loaded from jsDelivr CDN (`three@0.160.0`) — not a local dependency
+| Package | Version | Notes |
+|---------|---------|-------|
+| opencascade.js | ^1.1.1 | Full OCCT WASM — not occt-import-js (that only gives meshes) |
+| three | 0.160.0 | Loaded from jsDelivr CDN, not npm — must use `three.module.min.js` and `examples/jsm/` paths |
+
+## Project context
+
+- `spec.md` — full v1 specification (5 DFM rules, ship target May 4, 2026)
+- `samples/part1.step` — test part (15 faces: 11 Plane + 4 Cylinder, 72 edges)
+- `node_modules/` is not gitignored (contains the WASM binary)
