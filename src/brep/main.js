@@ -1,3 +1,5 @@
+import * as THREE from 'three';
+import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { loadStep } from './stepLoader.js';
 import { detectSharpCorners } from './detectSharpCorners.js';
 import { detectDeepHoles } from './detectDeepHoles.js';
@@ -125,7 +127,7 @@ function createViewer() {
   scene.add(grid);
 
   // Controls
-  const controls = new THREE.OrbitControls(camera, renderer.domElement);
+  const controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
   controls.dampingFactor = 0.1;
 

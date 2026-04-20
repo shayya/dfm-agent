@@ -27,13 +27,11 @@
   </style>
 
   <!-- Three.js + OrbitControls from CDN -->
-  <script src="https://cdn.jsdelivr.net/npm/three@0.164.1/build/three.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/three@0.164.1/examples/js/controls/OrbitControls.js"></script>
-
-  <!-- opencascade.js via import map -->
   <script type="importmap">
     {
       "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.min.js",
+        "three/examples/jsm/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
         "opencascade.js": "../../node_modules/opencascade.js/dist/opencascade.wasm.js"
       }
     }
