@@ -26,6 +26,7 @@ testHarness.html
        ├─ stepLoader.js    fetch WASM, parse STEP → TopoDS_Shape + topology stats
        ├─ detectSharpCorners.js
        ├─ detectDeepHoles.js
+       ├─ detectSmallFillets.js
        └─ tessellate.js    BRepMesh → triangle arrays for Three.js
 ```
 
@@ -35,15 +36,19 @@ testHarness.html
 
 | Detector | What it finds | How |
 |----------|--------------|-----|
-| Sharp corners | Line edges between two Planes, **internal** concave (pocket/recess), no fillet, angle < 135° | `BRepClass3d_SolidClassifier` — test point inside dihedral angle OUTSIDE solid = internal concave; fillet check via adjacent Circle+Cylinder edges |
+| Sharp corners | Line edges between two Planes, **internal** concave (pocket/recess), no fillet, angle < 135° | `BRepClass3d_SolidClassifier` — determine each face's outward normal via classifier, then test point in the (material-side of A, void-side of B) quadrant using direction `outB − outA`; fillet check via adjacent Circle+Cylinder edges |
 | Deep holes | Cylindrical faces that are voids (not shafts), with high depth/diameter | `BRepClass3d_SolidClassifier` — axis midpoint outside solid = hole |
+| Small fillets | Cylindrical fillet faces (axis inside solid, partial sweep < 300°) with radius < 1.0 mm | `BRepClass3d_SolidClassifier` — axis midpoint inside solid = internal fillet |
 
 ### Visualization
 
-Per-face highlighting via Three.js `addGroup()` + multi-material array. Flagged faces (from detector `faceIndex`/`faceA_index`/`faceB_index`) get colored materials:
-- Sharp corner faces → red (`0xff3333`)
-- Deep hole faces → orange (`0xff8800`)
-- All other faces → default steel blue (`0x7a8fa6`)
+Single light gray mesh with black B-Rep edge lines (`EdgesGeometry`, 20° feature angle). Issue overlays are drawn on top as separate geometry:
+
+- **Sharp corners** — blue wedge (cusp) geometry showing the material a tool can't reach, computed from edge endpoints, face normals, and interior directions
+- **Deep holes** — bright blue axis lines through the hole center
+- **Small fillets** — listed in results but no 3D overlay yet
+
+Toolbar controls: transparency slider, six preset views (top/front/bottom/back/left/right), home (fit camera), highlight toggle on/off, scale bar (1 inch reference), axis gizmo (lower-left).
 
 ### Tessellation
 
@@ -54,7 +59,7 @@ Per-face adaptive `BRepMesh_IncrementalMesh` — each face gets deflection setti
 
 `faceGroups` entries include `surfaceType` string for material assignment.
 
-Three more rules from `spec.md` are not yet implemented: min wall thickness, pocket aspect ratio, min feature size.
+Two more rules from `spec.md` are not yet implemented: min wall thickness, pocket aspect ratio, min feature size.
 
 ## opencascade.js API quirks
 
@@ -81,4 +86,5 @@ These are non-obvious and cost significant debugging time. All apply to opencasc
 
 - `spec.md` — full v1 specification (5 DFM rules, ship target May 4, 2026)
 - `samples/part1.step` — test part (15 faces: 11 Plane + 4 Cylinder, 72 edges)
+- `samples/din.step` — DIN rail test part (266 faces, 1588 edges)
 - `node_modules/` is not gitignored (contains the WASM binary)

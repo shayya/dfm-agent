@@ -1,6 +1,6 @@
 # DFM Agent
 
-Browser-based **Design for Manufacturability (DFM)** analyzer for CNC-machined parts. Loads a STEP file, parses it into full B-Rep topology via [opencascade.js](https://opencascade.js.org/) (OpenCASCADE compiled to WASM), runs geometric detectors, and renders the part in 3D with flagged issues highlighted per-face.
+Browser-based **Design for Manufacturability (DFM)** analyzer for CNC-machined parts. Loads a STEP file, parses it into full B-Rep topology via [opencascade.js](https://opencascade.js.org/) (OpenCASCADE compiled to WASM), runs geometric detectors, and renders the part in 3D with flagged issues shown as overlay geometry.
 
 The original Python agent (Claude Agent SDK + pythonOCC) lives on `main`. This is the JS B-Rep proof-of-concept on the `occt-brep-analysis` branch.
 
@@ -22,11 +22,12 @@ Working end-to-end: STEP file in, 3D visualization with highlighted DFM issues o
 
 **Not yet implemented** (from `spec.md`): min wall thickness, pocket aspect ratio, min feature size.
 
-**Visualization colors:**
-- Default faces — steel blue
-- Deep holes — orange
-- Small fillets — yellow
-- Sharp corner edges — red line overlay
+**Visualization:**
+- Part surface — light gray with black B-Rep edge lines
+- Sharp corners — blue wedge overlays showing leftover material a tool can't reach
+- Deep holes — bright blue axis lines through hole centers
+- Small fillets — listed in sidebar (no 3D overlay yet)
+- Controls — transparency slider, preset views, highlight toggle, scale bar, axis gizmo
 
 ## Running
 
