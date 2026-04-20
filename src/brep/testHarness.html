@@ -4,26 +4,122 @@
   <meta charset="UTF-8">
   <title>B-Rep DFM Analyzer</title>
   <style>
+    /* Reset & base */
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', monospace; background: #0f0f1a; color: #ccc; }
+    html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #ffffff; color: #1a1a1a; }
+
+    /* Layout */
     .layout { display: flex; height: 100vh; }
-    .sidebar { width: 380px; min-width: 320px; padding: 1em; overflow-y: auto; border-right: 1px solid #2a2a3e; display: flex; flex-direction: column; gap: 0.8em; }
-    #viewer { flex: 1; position: relative; }
-    h1 { font-size: 1.1em; color: #eee; }
-    #status { color: #888; font-size: 0.85em; }
-    #stats  { background: #16162a; padding: 0.5em 0.8em; border-radius: 4px; font-size: 0.85em; line-height: 1.5; }
+    .sidebar {
+      width: 380px; min-width: 320px; padding: 1em; overflow-y: auto;
+      border-right: 1px solid #e5e5e7; background: #fafafa;
+      display: flex; flex-direction: column; gap: 0.8em;
+    }
+    #viewer { flex: 1; position: relative; background: #f5f5f7; overflow: hidden; }
+
+    /* Typography */
+    h1 { font-size: 1.1em; color: #1a1a1a; }
+
+    /* Status & stats */
+    #status { color: #666; font-size: 0.85em; }
+    #stats  { background: #f0f0f2; padding: 0.5em 0.8em; border-radius: 6px; font-size: 0.85em; line-height: 1.5; }
     #stats ul { margin-left: 1.2em; }
+
+    /* Results */
     ul#results { list-style: none; font-size: 0.85em; }
-    ul#results li { padding: 0.4em 0.6em; border-left: 4px solid #555; margin-bottom: 0.3em; border-radius: 0 3px 3px 0; }
-    li.critical { border-color: #d00; background: rgba(200,0,0,0.12); }
-    li.warning  { border-color: #f80; background: rgba(255,140,0,0.10); }
-    li.ok       { border-color: #0a0; background: rgba(0,160,0,0.10); }
-    label { font-weight: bold; font-size: 0.9em; }
+    ul#results li { padding: 0.5em 0.7em; border-left: 4px solid #ccc; margin-bottom: 0.3em; border-radius: 0 4px 4px 0; background: #fff; }
+    li.critical { border-color: #d00; background: rgba(220,0,0,0.06); }
+    li.warning  { border-color: #f80; background: rgba(255,140,0,0.06); }
+    li.ok       { border-color: #0a0; background: rgba(0,160,0,0.06); }
+
+    /* Form */
+    label { font-weight: 600; font-size: 0.9em; }
     input[type="file"] { font-size: 0.85em; }
-    .legend { font-size: 0.75em; color: #777; margin-top: auto; }
+
+    /* Legend */
+    .legend { font-size: 0.75em; color: #666; margin-top: auto; }
     .legend span { margin-right: 1em; }
-    .legend .red { color: #ff3333; }
-    .legend .blue { color: #7a8fa6; }
+
+    /* ---- Floating toolbar (top-right) ---- */
+    #toolbar {
+      position: absolute; top: 16px; right: 16px; z-index: 10;
+      background: #fff; border: 1px solid #e5e5e7; border-radius: 10px;
+      padding: 14px; display: flex; flex-direction: column; gap: 14px;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.08); font-size: 12px;
+    }
+    .toolbar-section { display: flex; flex-direction: column; gap: 6px; }
+    .toolbar-section > label {
+      font-size: 10px; color: #888; font-weight: 700;
+      text-transform: uppercase; letter-spacing: 0.5px;
+    }
+    .toolbar-divider { height: 1px; background: #eee; }
+
+    /* Transparency slider */
+    #transparency-slider { width: 100%; cursor: pointer; }
+
+    /* View grid — 3 rows x 2 cols */
+    .view-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 3px; }
+    .view-grid button {
+      width: 36px; height: 26px; border: 1px solid #ddd; background: #fafafa;
+      border-radius: 4px; cursor: pointer; font-size: 10px; font-weight: 700;
+      color: #555; transition: background 0.15s;
+    }
+    .view-grid button:hover { background: #eee; }
+    .view-grid button:active { background: #ddd; }
+
+    /* Icon / action buttons */
+    .btn-icon {
+      width: 100%; padding: 6px; border: 1px solid #ddd; background: #fafafa;
+      border-radius: 6px; cursor: pointer; font-size: 12px; color: #444;
+      text-align: center; transition: background 0.15s;
+    }
+    .btn-icon:hover { background: #eee; }
+
+    /* Highlight toggle */
+    .radio-group { display: flex; gap: 10px; }
+    .radio-group label {
+      display: flex; align-items: center; gap: 3px;
+      font-weight: 400; font-size: 12px; cursor: pointer;
+    }
+
+    /* Distance stub */
+    #btn-distance {
+      width: 100%; padding: 6px 10px; border: 1px solid #ddd; background: #fafafa;
+      border-radius: 6px; cursor: default; font-size: 12px; color: #999; text-align: center;
+    }
+
+    /* ---- Bottom toggle (Simplified / Detailed) ---- */
+    #view-toggle {
+      position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%); z-index: 10;
+      background: #fff; border: 1px solid #e5e5e7; border-radius: 8px;
+      padding: 8px 16px; display: flex; gap: 16px; font-size: 13px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+    }
+    #view-toggle label {
+      font-weight: 400; cursor: pointer; display: flex; align-items: center; gap: 4px;
+    }
+
+    /* ---- Scale bar (top-center) ---- */
+    #scale-bar {
+      position: absolute; top: 20px; left: 50%; transform: translateX(-50%);
+      text-align: center; z-index: 10;
+    }
+    .scale-inner {
+      height: 2px; background: #555; position: relative; min-width: 20px;
+    }
+    .scale-inner::before, .scale-inner::after {
+      content: ''; position: absolute; width: 2px; height: 8px;
+      background: #555; top: -3px;
+    }
+    .scale-inner::before { left: 0; }
+    .scale-inner::after  { right: 0; }
+    #scale-bar span { font-size: 11px; color: #666; margin-top: 4px; display: block; }
+
+    /* ---- Axis gizmo (bottom-left) ---- */
+    #axis-gizmo {
+      position: absolute; bottom: 16px; left: 16px;
+      width: 90px; height: 90px; z-index: 10; border-radius: 8px; overflow: hidden;
+    }
   </style>
 
   <!-- Three.js + OrbitControls from CDN -->
@@ -41,8 +137,8 @@
   <div class="layout">
     <div class="sidebar">
       <h1>B-Rep DFM Analyzer</h1>
-      <p style="font-size:0.8em;color:#888;">
-        Detects sharp internal corners and deep small holes using B-Rep topology.
+      <p style="font-size:0.8em;color:#666;">
+        Detects sharp internal corners, deep small holes, and small fillets using B-Rep topology.
       </p>
       <label for="file-input">Load STEP file:</label>
       <input id="file-input" type="file" accept=".step,.stp">
@@ -52,12 +148,63 @@
       <ul id="results"></ul>
 
       <div class="legend">
-        <span class="red">&#9679; Sharp corners</span>
-        <span style="color:#ff8800">&#9679; Deep holes</span>
-        <span class="blue">&#9632; Part surface</span>
+        <span style="color:#0033ff">&#9679; Issues</span>
+        <span style="color:#999">&#9632; Part surface</span>
       </div>
     </div>
-    <div id="viewer"></div>
+
+    <div id="viewer">
+      <!-- Floating toolbar -->
+      <div id="toolbar">
+        <div class="toolbar-section">
+          <label>Transparency</label>
+          <input id="transparency-slider" type="range" min="0.1" max="1" step="0.05" value="1">
+        </div>
+        <div class="toolbar-divider"></div>
+        <div class="toolbar-section">
+          <label>Views</label>
+          <div class="view-grid">
+            <button id="view-top"    title="Top">Top</button>
+            <button id="view-front"  title="Front">Front</button>
+            <button id="view-bottom" title="Bottom">Bot</button>
+            <button id="view-back"   title="Back">Back</button>
+            <button id="view-left"   title="Left">Left</button>
+            <button id="view-right"  title="Right">Right</button>
+          </div>
+        </div>
+        <div class="toolbar-divider"></div>
+        <div class="toolbar-section">
+          <button id="btn-home" class="btn-icon" title="Fit to view">&#8962; Home</button>
+        </div>
+        <div class="toolbar-divider"></div>
+        <div class="toolbar-section">
+          <label>Highlight Issues</label>
+          <div class="radio-group">
+            <label><input type="radio" name="highlight" id="highlight-on" checked> On</label>
+            <label><input type="radio" name="highlight" id="highlight-off"> Off</label>
+          </div>
+        </div>
+        <div class="toolbar-divider"></div>
+        <div class="toolbar-section">
+          <button id="btn-distance">D&nbsp;&nbsp;Distance</button>
+        </div>
+      </div>
+
+      <!-- Bottom toggle -->
+      <div id="view-toggle">
+        <label><input type="radio" name="viewmode" value="simplified" checked> Simplified View</label>
+        <label><input type="radio" name="viewmode" value="detailed"> Detailed View</label>
+      </div>
+
+      <!-- Scale bar -->
+      <div id="scale-bar">
+        <div class="scale-inner"></div>
+        <span>1 in</span>
+      </div>
+
+      <!-- Axis gizmo -->
+      <div id="axis-gizmo"></div>
+    </div>
   </div>
 
   <script type="module" src="./main.js"></script>
