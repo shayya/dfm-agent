@@ -11,6 +11,8 @@ const statusEl  = document.getElementById('status');
 const statsEl   = document.getElementById('stats');
 const resultsEl = document.getElementById('results');
 
+const MIN_TOOL_RADIUS_MM = 0.794; // 1/32" end mill
+
 let viewer = null;
 
 fileInput.addEventListener('change', async (evt) => {
@@ -142,6 +144,7 @@ function createViewer() {
   let highlightEnabled = true;
   let issueOverlays    = null;
   let defaultMaterial  = null;
+  let wedgeMaterial    = null;
   let solidMesh        = null;
 
   // ---- Axis gizmo (lower-left) ----
@@ -269,31 +272,128 @@ function createViewer() {
       issueOverlays.userData.dfmMesh = true;
       issueOverlays.visible = highlightEnabled;
 
-      // Sharp corner edges — bright blue
+      // Sharp corners — cusp geometry (tool-radius leftover material)
       if (corners.length > 0) {
-        const pos = new Float32Array(corners.length * 6);
-        for (let i = 0; i < corners.length; i++) {
-          const c = corners[i];
-          const o = i * 6;
-          pos[o]     = c.startPoint.x; pos[o + 1] = c.startPoint.y; pos[o + 2] = c.startPoint.z;
-          pos[o + 3] = c.endPoint.x;   pos[o + 4] = c.endPoint.y;   pos[o + 5] = c.endPoint.z;
+        const R = MIN_TOOL_RADIUS_MM;
+        const N_ARC = 8;
+        const positions = [];
+        const indices = [];
+
+        for (let ci = 0; ci < corners.length; ci++) {
+          const c = corners[ci];
+          const sp = new THREE.Vector3(c.startPoint.x, c.startPoint.y, c.startPoint.z);
+          const ep = new THREE.Vector3(c.endPoint.x, c.endPoint.y, c.endPoint.z);
+          const edgeDir = new THREE.Vector3().subVectors(ep, sp).normalize();
+
+          const nA = new THREE.Vector3(c.faceA_normal.x, c.faceA_normal.y, c.faceA_normal.z).normalize();
+          const nB = new THREE.Vector3(c.faceB_normal.x, c.faceB_normal.y, c.faceB_normal.z).normalize();
+          const intA = new THREE.Vector3(c.faceA_interiorDir.x, c.faceA_interiorDir.y, c.faceA_interiorDir.z).normalize();
+          const intB = new THREE.Vector3(c.faceB_interiorDir.x, c.faceB_interiorDir.y, c.faceB_interiorDir.z).normalize();
+
+          // Project interior dirs onto face planes → tangent on face
+          function tangentOnFace(intDir, normal) {
+            const dot = intDir.dot(normal);
+            const t = intDir.clone().addScaledVector(normal, -dot);
+            const len = t.length();
+            return len > 1e-12 ? t.divideScalar(len) : intDir.clone();
+          }
+
+          const tanA = tangentOnFace(intA, nA);
+          const tanB = tangentOnFace(intB, nB);
+
+          // Bisector (into the void, away from material)
+          const bisector = new THREE.Vector3().addVectors(tanA, tanB).normalize();
+
+          const thetaRad = c.interiorAngleDeg * Math.PI / 180;
+          const thetaHalf = thetaRad / 2;
+
+          // Physical leg length and clamped legs
+          const aPhysical = R / Math.tan(thetaHalf);
+          const aA = Math.min(aPhysical, c.maxLegA_mm);
+          const aB = Math.min(aPhysical, c.maxLegB_mm);
+
+          // Tool center distance from edge along bisector
+          const d = R / Math.sin(thetaHalf);
+
+          // Arc center
+          const midPt = new THREE.Vector3().addVectors(sp, ep).multiplyScalar(0.5);
+          const arcCenter = midPt.clone().addScaledVector(bisector, d);
+
+          // Local 2D frame in cross-section plane (perp to edgeDir)
+          const u = tanA.clone();
+          let w = new THREE.Vector3().crossVectors(edgeDir, tanA).normalize();
+          if (tanB.dot(w) < 0) w.negate();
+
+          // Arc angles: legA tip at -π/2, legB tip at θ+π/2, concave sweep = -(π-θ)
+          const startAngle = -Math.PI / 2;
+          const sweepAngle = -(Math.PI - thetaRad);
+
+          // Build boundary offsets relative to edge point:
+          // [0] = edge point (zero), [1] = legA tip, [2..2+N_ARC] = arc, [3+N_ARC] = legB tip
+          const offsets = [new THREE.Vector3(0, 0, 0)];
+          offsets.push(tanA.clone().multiplyScalar(aA));
+          for (let j = 0; j <= N_ARC; j++) {
+            const angle = startAngle + sweepAngle * j / N_ARC;
+            offsets.push(
+              arcCenter.clone()
+                .addScaledVector(u, R * Math.cos(angle))
+                .addScaledVector(w, R * Math.sin(angle))
+                .sub(midPt)
+            );
+          }
+          offsets.push(tanB.clone().multiplyScalar(aB));
+
+          const nPts = offsets.length;
+
+          // Vertices at start and end of edge
+          const baseIdx = positions.length / 3;
+          for (const o of offsets) {
+            const v = sp.clone().add(o);
+            positions.push(v.x, v.y, v.z);
+          }
+          for (const o of offsets) {
+            const v = ep.clone().add(o);
+            positions.push(v.x, v.y, v.z);
+          }
+
+          const endBase = baseIdx + nPts;
+
+          // Start cap (fan from edge point = index 0 in this corner's block)
+          for (let j = 1; j < nPts - 1; j++) {
+            indices.push(baseIdx, baseIdx + j, baseIdx + j + 1);
+          }
+
+          // End cap (reversed winding)
+          for (let j = 1; j < nPts - 1; j++) {
+            indices.push(endBase, endBase + j + 1, endBase + j);
+          }
+
+          // Side quads
+          for (let j = 1; j < nPts - 1; j++) {
+            const s0 = baseIdx + j, s1 = baseIdx + j + 1;
+            const e0 = endBase + j, e1 = endBase + j + 1;
+            indices.push(s0, s1, e1,  s0, e1, e0);
+          }
         }
-        const geom = new THREE.BufferGeometry();
-        geom.setAttribute('position', new THREE.BufferAttribute(pos, 3));
 
-        // Glow pass — semi-transparent
-        const glowMat = new THREE.LineBasicMaterial({
-          color: 0x0033ff, depthTest: false, transparent: true, opacity: 0.35,
+        const cuspGeom = new THREE.BufferGeometry();
+        cuspGeom.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+        cuspGeom.setIndex(indices);
+        cuspGeom.computeVertexNormals();
+
+        const cuspMat = new THREE.MeshBasicMaterial({
+          color: 0x1a3dd6,
+          side: THREE.DoubleSide,
+          polygonOffset: true,
+          polygonOffsetFactor: -2,
+          polygonOffsetUnits: -2,
         });
-        const glow = new THREE.LineSegments(geom.clone(), glowMat);
-        glow.renderOrder = 2;
-        issueOverlays.add(glow);
+        const cuspMesh = new THREE.Mesh(cuspGeom, cuspMat);
+        cuspMesh.renderOrder = 2;
+        cuspMesh.userData.dfmMesh = true;
+        issueOverlays.add(cuspMesh);
 
-        // Solid pass
-        const solidMat = new THREE.LineBasicMaterial({ color: 0x0033ff, depthTest: false });
-        const solid = new THREE.LineSegments(geom, solidMat);
-        solid.renderOrder = 3;
-        issueOverlays.add(solid);
+        wedgeMaterial = cuspMat;
       }
 
       // Deep hole axis lines — bright blue
@@ -352,6 +452,10 @@ function createViewer() {
       if (defaultMaterial) {
         defaultMaterial.opacity = v;
         defaultMaterial.transparent = v < 1;
+      }
+      if (wedgeMaterial) {
+        wedgeMaterial.depthTest = v >= 1;
+        wedgeMaterial.needsUpdate = true;
       }
     },
 
